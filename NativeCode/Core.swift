@@ -102,6 +102,145 @@ enum NCFileKind: String, Hashable {
     }
 }
 
+enum NCLanguage: String, CaseIterable, Identifiable, Hashable {
+    case auto
+    case swift
+    case python
+    case javascript
+    case typescript
+    case json
+    case markdown
+    case yaml
+    case shell
+    case plaintext
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .auto: return "Auto Detect"
+        case .swift: return "Swift"
+        case .python: return "Python"
+        case .javascript: return "JavaScript"
+        case .typescript: return "TypeScript"
+        case .json: return "JSON"
+        case .markdown: return "Markdown"
+        case .yaml: return "YAML"
+        case .shell: return "Shell"
+        case .plaintext: return "Plain Text"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .auto: return "wand.and.stars"
+        case .swift: return "swift"
+        case .python: return "chevron.left.forwardslash.chevron.right"
+        case .javascript, .typescript: return "curlybraces.square"
+        case .json: return "curlybraces"
+        case .markdown: return "text.alignleft"
+        case .yaml: return "list.bullet.rectangle"
+        case .shell: return "terminal"
+        case .plaintext: return "doc.text"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .swift: return NCColors.orange
+        case .python: return NCColors.yellow
+        case .javascript, .typescript: return NCColors.accent
+        case .json: return NCColors.yellow
+        case .markdown: return NCColors.accent
+        case .yaml: return NCColors.pink
+        case .shell: return NCColors.green
+        case .auto, .plaintext: return NCColors.secondary
+        }
+    }
+
+    var isRunnable: Bool {
+        switch self {
+        case .swift, .python, .javascript, .typescript, .shell: return true
+        case .auto, .json, .markdown, .yaml, .plaintext: return false
+        }
+    }
+
+    var keywords: Set<String> {
+        switch self {
+        case .swift:
+            return ["import", "struct", "class", "enum", "protocol", "extension", "private", "public", "internal", "var", "let", "func", "return", "if", "else", "switch", "case", "guard", "for", "in", "some", "async", "await", "throws", "throw", "where", "actor", "try"]
+        case .python:
+            return ["def", "class", "import", "from", "as", "return", "if", "elif", "else", "for", "while", "in", "try", "except", "with", "lambda", "async", "await", "yield", "raise", "pass", "True", "False", "None"]
+        case .javascript, .typescript:
+            return ["const", "let", "var", "function", "return", "if", "else", "for", "while", "class", "extends", "import", "from", "export", "async", "await", "new", "this", "interface", "type", "public", "private"]
+        case .shell:
+            return ["if", "then", "else", "fi", "for", "in", "do", "done", "case", "esac", "function", "export"]
+        case .json, .markdown, .yaml, .auto, .plaintext:
+            return []
+        }
+    }
+
+    static func detect(from path: String) -> NCLanguage {
+        switch URL(fileURLWithPath: path).pathExtension.lowercased() {
+        case "swift": return .swift
+        case "py": return .python
+        case "js", "jsx": return .javascript
+        case "ts", "tsx": return .typescript
+        case "json": return .json
+        case "md", "markdown": return .markdown
+        case "yml", "yaml": return .yaml
+        case "sh", "bash", "zsh": return .shell
+        default: return .plaintext
+        }
+    }
+}
+
+enum NCDiagnosticSeverity: String, Hashable {
+    case error
+    case warning
+
+    var color: Color {
+        switch self {
+        case .error: return NCColors.red
+        case .warning: return NCColors.yellow
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .error: return "xmark.octagon.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        }
+    }
+}
+
+struct NCDiagnostic: Identifiable, Hashable {
+    let line: Int
+    let column: Int
+    let message: String
+    let severity: NCDiagnosticSeverity
+
+    var id: String { "\(line):\(column):\(severity.rawValue):\(message)" }
+}
+
+enum NCExecutionState: Equatable {
+    case idle
+    case running
+    case success
+    case failure
+    case unavailable
+
+    var title: String {
+        switch self {
+        case .idle: return "Ready"
+        case .running: return "Running"
+        case .success: return "Queued"
+        case .failure: return "Failed"
+        case .unavailable: return "Unavailable"
+        }
+    }
+}
+
 struct NCWorkspaceEntry: Identifiable, Hashable {
     let path: String
     let name: String
@@ -196,6 +335,10 @@ final class NativeCodeStore: ObservableObject {
     @Published var accent: NCAccent = .cyan
     @Published var hapticsEnabled = true
     @Published var reduceMotion = false
+    @Published var selectedLanguage: NCLanguage = .auto
+    @Published private(set) var diagnostics: [NCDiagnostic] = []
+    @Published private(set) var executionState: NCExecutionState = .idle
+    @Published private(set) var executionOutput = ""
 
     @Published private(set) var isGitHubConnected = false
     @Published private(set) var commits: [NCCommit] = []
@@ -213,6 +356,12 @@ final class NativeCodeStore: ObservableObject {
 
     var modifiedFiles: [NCWorkspaceEntry] {
         workspaceEntries.filter { !$0.isDirectory && $0.isModified }
+    }
+
+    var effectiveLanguage: NCLanguage {
+        if selectedLanguage != .auto { return selectedLanguage }
+        guard let activeFile else { return .plaintext }
+        return NCLanguage.detect(from: activeFile.path)
     }
 
     var visibleWorkspaceEntries: [NCWorkspaceEntry] {
@@ -322,8 +471,14 @@ final class NativeCodeStore: ObservableObject {
             case .none:
                 editorText = ""
             }
+            analyzeCurrentFile()
+            executionState = .idle
+            executionOutput = ""
         } catch {
             editorText = ""
+            diagnostics = []
+            executionState = .idle
+            executionOutput = ""
             lastError = error.localizedDescription
             showToast("Could not open \(entry.name)")
         }
@@ -334,6 +489,7 @@ final class NativeCodeStore: ObservableObject {
         guard let activeFilePath,
               let index = workspaceEntries.firstIndex(where: { $0.path == activeFilePath }) else { return }
         workspaceEntries[index].isModified = true
+        analyzeCurrentFile()
     }
 
     func toggleEditing() {
@@ -347,6 +503,97 @@ final class NativeCodeStore: ObservableObject {
             isEditing = true
         }
         if hapticsEnabled { NCHaptics.selection() }
+    }
+
+    func chooseLanguage(_ language: NCLanguage) {
+        selectedLanguage = language
+        analyzeCurrentFile()
+        if hapticsEnabled { NCHaptics.selection() }
+    }
+
+    func analyzeCurrentFile() {
+        guard activeFile != nil, !editorText.isEmpty else {
+            diagnostics = []
+            return
+        }
+
+        let language = effectiveLanguage
+        var found: [NCDiagnostic] = []
+        let lines = editorText.components(separatedBy: .newlines)
+
+        if language == .json {
+            do {
+                guard let data = editorText.data(using: .utf8) else { throw NCGitHubError.invalidURL }
+                _ = try JSONSerialization.jsonObject(with: data)
+            } catch {
+                found.append(NCDiagnostic(line: 1, column: 1, message: "Invalid JSON: \(error.localizedDescription)", severity: .error))
+            }
+        }
+
+        var stack: [(Character, Int, Int)] = []
+        var inString = false
+        var escaped = false
+        for (lineIndex, line) in lines.enumerated() {
+            for (columnIndex, character) in line.enumerated() {
+                if escaped {
+                    escaped = false
+                    continue
+                }
+                if character == "\\" && inString {
+                    escaped = true
+                    continue
+                }
+                if character == "\"" {
+                    inString.toggle()
+                    continue
+                }
+                if inString { continue }
+                if character == "{" || character == "(" || character == "[" {
+                    stack.append((character, lineIndex + 1, columnIndex + 1))
+                } else if character == "}" || character == ")" || character == "]" {
+                    let expected: Character = character == "}" ? "{" : character == ")" ? "(" : "["
+                    if let last = stack.last, last.0 == expected {
+                        stack.removeLast()
+                    } else {
+                        found.append(NCDiagnostic(line: lineIndex + 1, column: columnIndex + 1, message: "Unexpected '\(character)'", severity: .error))
+                    }
+                }
+            }
+
+            if line.localizedCaseInsensitiveContains("TODO") {
+                found.append(NCDiagnostic(line: lineIndex + 1, column: 1, message: "TODO marker", severity: .warning))
+            }
+        }
+
+        for (_, line, column) in stack {
+            found.append(NCDiagnostic(line: line, column: column, message: "Unclosed delimiter", severity: .error))
+        }
+
+        diagnostics = found
+    }
+
+    func runCurrentFile() async {
+        analyzeCurrentFile()
+        if diagnostics.contains(where: { $0.severity == .error }) {
+            executionState = .failure
+            executionOutput = "Fix diagnostics before running this file."
+            showToast("Fix editor errors first")
+            return
+        }
+        guard effectiveLanguage.isRunnable else {
+            executionState = .unavailable
+            executionOutput = "\(effectiveLanguage.title) files are not executable."
+            showToast("This language is not executable")
+            return
+        }
+        guard projectSource == .github else {
+            executionState = .unavailable
+            executionOutput = "Local execution needs a configured runtime. GitHub projects run through Actions."
+            showToast("Run this project through GitHub Actions")
+            return
+        }
+
+        await runWorkflow()
     }
 
     func connectGitHub() async {
@@ -386,6 +633,8 @@ final class NativeCodeStore: ObservableObject {
             currentBranch = ""
             clearActiveFile()
         }
+        executionState = .idle
+        executionOutput = ""
         showToast("GitHub disconnected")
     }
 
@@ -458,6 +707,8 @@ final class NativeCodeStore: ObservableObject {
                 clearActiveFile()
             }
 
+            analyzeCurrentFile()
+
             showToast("Synced \(workspaceEntries.filter { !$0.isDirectory }.count) files")
         } catch {
             lastError = error.localizedDescription
@@ -476,6 +727,8 @@ final class NativeCodeStore: ObservableObject {
         }
 
         isRunningWorkflow = true
+        executionState = .running
+        executionOutput = "Dispatching ci.yml on \(currentBranch)…"
         defer { isRunningWorkflow = false }
         do {
             try await github.dispatchWorkflow(
@@ -485,10 +738,14 @@ final class NativeCodeStore: ObservableObject {
                 branch: currentBranch
             )
             if hapticsEnabled { NCHaptics.success() }
+            executionState = .success
+            executionOutput = "GitHub Actions accepted the run for \(currentBranch)."
             showToast("Workflow queued")
             await refreshGitHub()
         } catch {
             lastError = error.localizedDescription
+            executionState = .failure
+            executionOutput = error.localizedDescription
             showToast("Could not start workflow")
         }
     }
@@ -582,13 +839,16 @@ final class NativeCodeStore: ObservableObject {
         activeFilePath = nil
         editorText = ""
         isEditing = false
+        diagnostics = []
+        executionState = .idle
+        executionOutput = ""
     }
 
     private static func localEntries(at root: URL) -> [NCWorkspaceEntry] {
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            options: [.skipsPackageDescendants]
         ) else { return [] }
 
         let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
@@ -596,6 +856,7 @@ final class NativeCodeStore: ObservableObject {
         for case let url as URL in enumerator {
             let relativePath = url.path.replacingOccurrences(of: prefix, with: "")
             if relativePath == ".git" || relativePath.hasPrefix(".git/") { continue }
+            if url.lastPathComponent == ".DS_Store" { continue }
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
             let isDirectory = values?.isDirectory == true
             if isDirectory || values?.isRegularFile == true {

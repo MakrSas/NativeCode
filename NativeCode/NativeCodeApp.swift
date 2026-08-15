@@ -19,7 +19,20 @@ struct NativeCodeShell: View {
 
     var body: some View {
         GeometryReader { geometry in
+            let drawerWidth = min(350, geometry.size.width * 0.84)
+
             ZStack(alignment: .leading) {
+                // The navigator is the bottom layer. The editor surface above it
+                // moves as one piece, so the drawer never covers the editor.
+                NCProjectSidebar {
+                    withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
+                        isSidebarPresented = false
+                    }
+                }
+                .frame(width: drawerWidth)
+                .frame(maxHeight: .infinity, alignment: .topLeading)
+                .background(.regularMaterial)
+
                 NavigationStack {
                     activeView
                         .navigationTitle(navigationTitle)
@@ -91,46 +104,30 @@ struct NativeCodeShell: View {
                         .toolbarBackground(.visible, for: .navigationBar)
                         .toolbarBackground(NCColors.canvas, for: .navigationBar)
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height)
                 .background(NCColors.canvas)
-
-                if isSidebarPresented {
-                    Color.black.opacity(0.42)
-                        .ignoresSafeArea()
-                        .onTapGesture {
+                // ContainerRelativeShape follows the system container/safe area,
+                // giving the shifted surface the device's native corner treatment.
+                .clipShape(ContainerRelativeShape())
+                .padding(.vertical, isSidebarPresented ? 8 : 0)
+                .padding(.trailing, isSidebarPresented ? 8 : 0)
+                .offset(x: isSidebarPresented ? drawerWidth - 8 : 0)
+                .shadow(
+                    color: isSidebarPresented ? .black.opacity(0.38) : .clear,
+                    radius: isSidebarPresented ? 24 : 0,
+                    x: isSidebarPresented ? -6 : 0,
+                    y: 0
+                )
+                .zIndex(1)
+                .gesture(
+                    DragGesture(minimumDistance: 16)
+                        .onEnded { value in
+                            guard isSidebarPresented, value.translation.width < -70 else { return }
                             withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
                                 isSidebarPresented = false
                             }
                         }
-
-                    NCProjectSidebar {
-                        withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
-                            isSidebarPresented = false
-                        }
-                    }
-                    .frame(width: min(350, geometry.size.width * 0.88))
-                    .frame(maxHeight: .infinity)
-                    .background(.regularMaterial)
-                    .clipShape(
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: 0,
-                            bottomLeadingRadius: 0,
-                            bottomTrailingRadius: 26,
-                            topTrailingRadius: 26,
-                            style: .continuous
-                        )
-                    )
-                    .shadow(color: .black.opacity(0.34), radius: 28, x: 12, y: 0)
-                    .transition(.move(edge: .leading))
-                    .gesture(
-                        DragGesture(minimumDistance: 16)
-                            .onEnded { value in
-                                guard value.translation.width < -70 else { return }
-                                withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
-                                    isSidebarPresented = false
-                                }
-                            }
-                    )
-                }
+                )
             }
         }
         .preferredColorScheme(.dark)
