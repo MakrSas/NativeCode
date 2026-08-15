@@ -118,4 +118,22 @@ extension View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
     }
+
+    @ViewBuilder
+    func sidebarRow(selected: Bool = false, tint: Color? = nil) -> some View {
+        let fill = tint ?? (selected ? NCColors.accent.opacity(0.15) : Color.white.opacity(0.045))
+
+        self
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(fill)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(
+                        Color.white.opacity(selected ? 0.13 : 0.06),
+                        lineWidth: 0.7
+                    )
+            }
+    }
 }

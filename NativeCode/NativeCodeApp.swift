@@ -16,10 +16,13 @@ struct NativeCodeApp: App {
 struct NativeCodeShell: View {
     @EnvironmentObject private var store: NativeCodeStore
     @State private var isSidebarPresented = false
+    @State private var edgeDragOffset: CGFloat = 0
 
     var body: some View {
         GeometryReader { geometry in
             let drawerWidth = min(350, geometry.size.width * 0.84)
+            let surfaceOffset = isSidebarPresented ? drawerWidth : edgeDragOffset
+            let isSurfaceDimmed = isSidebarPresented || edgeDragOffset > 0
 
             ZStack(alignment: .leading) {
                 // The navigator is the bottom layer. The editor surface above it
@@ -28,14 +31,26 @@ struct NativeCodeShell: View {
                 Color.black
                     .ignoresSafeArea()
 
-                NCProjectSidebar {
-                    withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
-                        isSidebarPresented = false
+                ZStack(alignment: .top) {
+                    Color.black
+
+                    NCProjectSidebar {
+                        withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
+                            isSidebarPresented = false
+                            edgeDragOffset = 0
+                        }
                     }
+                    .frame(
+                        width: drawerWidth,
+                        height: max(0, geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom),
+                        alignment: .top
+                    )
+                    .padding(.top, geometry.safeAreaInsets.top)
+                    .padding(.bottom, geometry.safeAreaInsets.bottom)
                 }
-                .frame(width: drawerWidth)
-                .frame(height: geometry.size.height)
+                .frame(width: drawerWidth, height: geometry.size.height, alignment: .top)
                 .background(Color.black)
+                .clipped()
                 .ignoresSafeArea()
 
                 NavigationStack {
@@ -47,6 +62,7 @@ struct NativeCodeShell: View {
                                 Button {
                                     withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
                                         isSidebarPresented.toggle()
+                                        edgeDragOffset = 0
                                     }
                                 } label: {
                                     Image(systemName: "sidebar.left")
@@ -114,21 +130,41 @@ struct NativeCodeShell: View {
                 // ContainerRelativeShape follows the device container, while the
                 // surface itself remains the original screen width when shifted.
                 .clipShape(ContainerRelativeShape())
-                .offset(x: isSidebarPresented ? drawerWidth : 0)
-                .colorMultiply(isSidebarPresented ? Color(white: 0.78) : .white)
+                .offset(x: surfaceOffset)
+                .colorMultiply(isSurfaceDimmed ? Color(white: 0.78) : .white)
                 .shadow(
-                    color: isSidebarPresented ? .black.opacity(0.38) : .clear,
-                    radius: isSidebarPresented ? 24 : 0,
-                    x: isSidebarPresented ? -10 : 0,
+                    color: isSurfaceDimmed ? .black.opacity(0.38) : .clear,
+                    radius: isSurfaceDimmed ? 24 : 0,
+                    x: isSurfaceDimmed ? -10 : 0,
                     y: 0
                 )
                 .zIndex(1)
-                .gesture(
+                .simultaneousGesture(
                     DragGesture(minimumDistance: 16)
+                        .onChanged { value in
+                            guard !isSidebarPresented,
+                                  value.startLocation.x <= 44,
+                                  value.translation.width > 0 else { return }
+                            edgeDragOffset = min(drawerWidth, value.translation.width)
+                        }
                         .onEnded { value in
-                            guard isSidebarPresented, value.translation.width < -70 else { return }
-                            withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
-                                isSidebarPresented = false
+                            let animation = store.reduceMotion ? nil : Animation.snappy(duration: 0.28)
+
+                            if isSidebarPresented {
+                                guard value.translation.width < -70 else { return }
+                                withAnimation(animation) {
+                                    isSidebarPresented = false
+                                    edgeDragOffset = 0
+                                }
+                                return
+                            }
+
+                            let startedAtLeadingEdge = value.startLocation.x <= 44
+                            let openThreshold = max(70, drawerWidth * 0.22)
+                            let shouldOpen = startedAtLeadingEdge && value.translation.width >= openThreshold
+                            withAnimation(animation) {
+                                isSidebarPresented = shouldOpen
+                                edgeDragOffset = 0
                             }
                         }
                 )
@@ -208,67 +244,40 @@ struct NCProjectSidebar: View {
     let dismiss: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "chevron.left")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(NCColors.secondary)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: dismiss)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                sidebarHeader
 
-                Text("NativeCode")
-                    .font(.title2.weight(.bold))
+                Divider()
+                    .padding(.horizontal, 6)
 
-                Spacer()
-
-                Menu {
-                    Button {
-                        store.isShowingProjectImporter = true
-                        dismiss()
-                    } label: {
-                        Label("Open Local Folder", systemImage: "folder.badge.plus")
-                    }
-                    Button {
-                        store.select(.settings)
-                        dismiss()
-                    } label: {
-                        Label("Connect GitHub", systemImage: "link")
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.headline.weight(.semibold))
-                        .frame(width: 30, height: 30)
-                }
-                .accessibilityLabel("Add project")
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 18)
-            .padding(.bottom, 14)
-
-            Divider()
-
-            List {
-                Section("Workspace") {
+                sidebarSectionTitle("Workspace")
+                VStack(spacing: 5) {
                     destinationRow(.workspace, title: "Editor")
                     destinationRow(.sourceControl, title: "Source Control", badge: store.modifiedFiles.count)
                     destinationRow(.actions, title: "Actions")
                 }
 
-                Section("Project") {
+                sidebarSectionTitle("Project")
+                VStack(spacing: 5) {
                     if store.projectSource == .none {
                         Button {
                             store.isShowingProjectImporter = true
                             dismiss()
                         } label: {
                             Label("Open a project", systemImage: "folder.badge.plus")
+                                .padding(.horizontal, 14)
+                                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
                         }
-                        .ncListRow()
+                        .buttonStyle(.plain)
+                        .sidebarRow()
                     } else {
-                        HStack(spacing: 10) {
+                        HStack(spacing: 11) {
                             Image(systemName: store.projectSource == .github ? "network" : "folder.fill")
+                                .font(.body.weight(.semibold))
                                 .foregroundStyle(store.projectSource == .github ? NCColors.accent : NCColors.violet)
-                            VStack(alignment: .leading, spacing: 2) {
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(store.projectName)
                                     .font(.body.weight(.semibold))
                                     .lineLimit(1)
@@ -276,9 +285,14 @@ struct NCProjectSidebar: View {
                                     .font(.caption)
                                     .foregroundStyle(NCColors.secondary)
                             }
-                            Spacer()
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.bold))
+                                .foregroundStyle(NCColors.tertiary)
                         }
-                        .ncListRow()
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        .sidebarRow()
 
                         ForEach(store.visibleWorkspaceEntries) { entry in
                             projectEntryRow(entry)
@@ -287,17 +301,22 @@ struct NCProjectSidebar: View {
                         Button("Close project", role: .destructive) {
                             store.closeProject()
                         }
-                        .ncListRow()
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                        .sidebarRow(tint: NCColors.red.opacity(0.10))
                     }
                 }
 
-                Section("GitHub") {
+                sidebarSectionTitle("GitHub")
+                VStack(spacing: 5) {
                     if store.isGitHubConnected {
                         destinationRow(.github, title: "Repository")
-                        HStack(spacing: 10) {
+                        HStack(spacing: 11) {
                             Image(systemName: "person.crop.circle")
+                                .font(.body.weight(.semibold))
                                 .foregroundStyle(NCColors.accent)
-                            VStack(alignment: .leading, spacing: 2) {
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text("@\(store.githubLogin)")
                                     .font(.body.weight(.medium))
                                 Text(store.repositoryName)
@@ -305,12 +324,14 @@ struct NCProjectSidebar: View {
                                     .foregroundStyle(NCColors.secondary)
                                     .lineLimit(1)
                             }
-                            Spacer()
+                            Spacer(minLength: 0)
                             Circle()
                                 .fill(NCColors.green)
                                 .frame(width: 8, height: 8)
                         }
-                        .ncListRow()
+                        .padding(.horizontal, 14)
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        .sidebarRow()
 
                         if !store.currentBranch.isEmpty {
                             Menu {
@@ -325,10 +346,23 @@ struct NCProjectSidebar: View {
                                     }
                                 }
                             } label: {
-                                Label(store.currentBranch, systemImage: "arrow.triangle.branch")
-                                    .foregroundStyle(.primary)
+                                HStack(spacing: 11) {
+                                    Image(systemName: "arrow.triangle.branch")
+                                        .font(.body.weight(.semibold))
+                                        .foregroundStyle(NCColors.yellow)
+                                        .frame(width: 24)
+                                    Text(store.currentBranch)
+                                        .foregroundStyle(.primary)
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption.weight(.bold))
+                                        .foregroundStyle(NCColors.tertiary)
+                                }
+                                .padding(.horizontal, 14)
+                                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
                             }
-                            .ncListRow()
+                            .buttonStyle(.plain)
+                            .sidebarRow()
                         }
                     } else {
                         Button {
@@ -336,19 +370,82 @@ struct NCProjectSidebar: View {
                             dismiss()
                         } label: {
                             Label("Connect GitHub", systemImage: "link")
+                                .padding(.horizontal, 14)
+                                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
                         }
-                        .ncListRow()
+                        .buttonStyle(.plain)
+                        .sidebarRow(tint: NCColors.accent.opacity(0.12))
                     }
                 }
 
-                Section {
-                    destinationRow(.settings, title: "Settings")
-                }
+                sidebarSectionTitle("Preferences")
+                destinationRow(.settings, title: "Settings")
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 30)
         }
+        .background(Color.black)
         .foregroundStyle(.primary)
+    }
+
+    private var sidebarHeader: some View {
+        HStack(spacing: 12) {
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 38, height: 38)
+                    .background(Color.white.opacity(0.09), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close project navigator")
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("NativeCode")
+                    .font(.title2.weight(.bold))
+                Text(store.projectName.isEmpty ? "Project navigator" : store.projectName)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(NCColors.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            Menu {
+                Button {
+                    store.isShowingProjectImporter = true
+                    dismiss()
+                } label: {
+                    Label("Open Local Folder", systemImage: "folder.badge.plus")
+                }
+                Button {
+                    store.select(.settings)
+                    dismiss()
+                } label: {
+                    Label("Connect GitHub", systemImage: "link")
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.headline.weight(.semibold))
+                    .frame(width: 38, height: 38)
+                    .background(NCColors.accent.opacity(0.16), in: Circle())
+                    .foregroundStyle(NCColors.accent)
+            }
+            .accessibilityLabel("Add project")
+        }
+        .padding(.horizontal, 6)
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+    }
+
+    private func sidebarSectionTitle(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption.weight(.bold))
+            .tracking(1.1)
+            .foregroundStyle(NCColors.secondary)
+            .padding(.horizontal, 8)
+            .padding(.top, 22)
+            .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -371,9 +468,12 @@ struct NCProjectSidebar: View {
                         .foregroundStyle(NCColors.yellow)
                 }
             }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .ncListRow()
+        .sidebarRow(selected: store.selectedPanel == panel)
     }
 
     @ViewBuilder
@@ -406,10 +506,12 @@ struct NCProjectSidebar: View {
                 }
             }
             .padding(.leading, CGFloat(entry.depth) * 14)
+            .padding(.trailing, 14)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .ncListRow()
+        .sidebarRow(selected: entry.path == store.activeFilePath)
     }
 }
 
