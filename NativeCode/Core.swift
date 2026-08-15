@@ -168,11 +168,11 @@ enum NCLanguage: String, CaseIterable, Identifiable, Hashable {
     var keywords: Set<String> {
         switch self {
         case .swift:
-            return ["import", "struct", "class", "enum", "protocol", "extension", "private", "public", "internal", "var", "let", "func", "return", "if", "else", "switch", "case", "guard", "for", "in", "some", "async", "await", "throws", "throw", "where", "actor", "try"]
+            return ["import", "struct", "class", "enum", "protocol", "extension", "private", "public", "internal", "fileprivate", "open", "var", "let", "func", "init", "deinit", "return", "if", "else", "switch", "case", "default", "guard", "for", "in", "while", "repeat", "where", "some", "any", "async", "await", "throws", "throw", "rethrows", "try", "catch", "defer", "do", "actor", "static", "final", "override", "mutating", "nonmutating", "lazy", "weak", "unowned", "as", "is", "inout"]
         case .python:
-            return ["def", "class", "import", "from", "as", "return", "if", "elif", "else", "for", "while", "in", "try", "except", "with", "lambda", "async", "await", "yield", "raise", "pass", "True", "False", "None"]
+            return ["def", "class", "import", "from", "as", "return", "if", "elif", "else", "for", "while", "in", "not", "and", "or", "is", "try", "except", "finally", "with", "lambda", "async", "await", "yield", "raise", "pass", "break", "continue", "global", "nonlocal", "assert", "del", "match", "case", "True", "False", "None"]
         case .javascript, .typescript:
-            return ["const", "let", "var", "function", "return", "if", "else", "for", "while", "class", "extends", "import", "from", "export", "async", "await", "new", "this", "interface", "type", "public", "private"]
+            return ["const", "let", "var", "function", "return", "if", "else", "for", "of", "while", "do", "class", "extends", "import", "from", "export", "default", "async", "await", "new", "this", "super", "interface", "type", "public", "private", "protected", "readonly", "try", "catch", "finally", "throw", "switch", "case", "break", "continue", "typeof", "instanceof", "in", "get", "set"]
         case .shell:
             return ["if", "then", "else", "fi", "for", "in", "do", "done", "case", "esac", "function", "export"]
         case .json, .markdown, .yaml, .auto, .plaintext:
@@ -234,7 +234,7 @@ enum NCExecutionState: Equatable {
         switch self {
         case .idle: return "Ready"
         case .running: return "Running"
-        case .success: return "Queued"
+        case .success: return "Finished"
         case .failure: return "Failed"
         case .unavailable: return "Unavailable"
         }
@@ -586,10 +586,36 @@ final class NativeCodeStore: ObservableObject {
             showToast("This language is not executable")
             return
         }
+
+        if effectiveLanguage == .python {
+            guard NCPythonRuntime.isAvailable else {
+                executionState = .unavailable
+                executionOutput = "This IPA was built without the embedded Python runtime."
+                showToast("Python runtime is missing from this build")
+                return
+            }
+
+            executionState = .running
+            executionOutput = "Running Python 3.13 on this iPhone…"
+            let result = await NCPythonRuntime.execute(
+                source: editorText,
+                fileName: activeFile?.path ?? "main.py"
+            )
+            executionState = result.succeeded ? .success : .failure
+            executionOutput = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if result.succeeded {
+                if hapticsEnabled { NCHaptics.success() }
+                showToast("Finished on this iPhone")
+            } else {
+                showToast("Python execution failed")
+            }
+            return
+        }
+
         guard projectSource == .github else {
             executionState = .unavailable
-            executionOutput = "Local execution needs a configured runtime. GitHub projects run through Actions."
-            showToast("Run this project through GitHub Actions")
+            executionOutput = "On-device execution is currently available for Python. Other languages can run through GitHub Actions."
+            showToast("Use Python for on-device execution")
             return
         }
 

@@ -442,32 +442,22 @@ struct NCCodeLine: View {
     }
 
     private var highlightedText: Text {
-        let keywords = language.keywords
-        let tokens = text.split(separator: " ", omittingEmptySubsequences: false)
+        let string = text as NSString
+        let tokens = NCSyntaxTokenizer.tokenize(text, language: language)
         var result = Text("")
+        var cursor = 0
 
-        for (index, token) in tokens.enumerated() {
-            let raw = String(token)
-            let normalized = raw.trimmingCharacters(in: .punctuationCharacters)
-            let color: Color
-            if raw.trimmingCharacters(in: .whitespaces).hasPrefix("//") || raw.trimmingCharacters(in: .whitespaces).hasPrefix("#") {
-                color = NCColors.green
-            } else if raw.hasPrefix("\"") || raw.hasSuffix("\"") {
-                color = NCColors.orange
-            } else if keywords.contains(normalized) {
-                color = NCColors.violet
-            } else if ["true", "false", "nil"].contains(normalized) {
-                color = NCColors.yellow
-            } else if raw.first == "." {
-                color = NCColors.orange
-            } else {
-                color = .primary
+        for token in tokens {
+            guard token.range.location >= cursor else { continue }
+            if token.range.location > cursor {
+                result = result + Text(string.substring(with: NSRange(location: cursor, length: token.range.location - cursor)))
             }
+            result = result + Text(string.substring(with: token.range)).foregroundColor(token.kind.swiftUIColor)
+            cursor = token.range.location + token.range.length
+        }
 
-            result = result + Text(raw).foregroundColor(color)
-            if index < tokens.count - 1 {
-                result = result + Text(" ")
-            }
+        if cursor < string.length {
+            result = result + Text(string.substring(from: cursor))
         }
 
         return result
@@ -475,12 +465,372 @@ struct NCCodeLine: View {
 }
 
 private enum NCSyntaxPalette {
-    static let keyword = UIColor(red: 0.70, green: 0.52, blue: 1.0, alpha: 1)
+    static let keyword = UIColor(red: 0.72, green: 0.55, blue: 1.0, alpha: 1)
     static let string = UIColor(red: 1.0, green: 0.64, blue: 0.30, alpha: 1)
     static let number = UIColor(red: 1.0, green: 0.80, blue: 0.35, alpha: 1)
-    static let comment = UIColor(red: 0.38, green: 0.84, blue: 0.56, alpha: 1)
-    static let type = UIColor(red: 0.36, green: 0.82, blue: 0.90, alpha: 1)
+    static let comment = UIColor(red: 0.40, green: 0.84, blue: 0.56, alpha: 1)
+    static let type = UIColor(red: 0.38, green: 0.83, blue: 0.93, alpha: 1)
+    static let function = UIColor(red: 0.42, green: 0.76, blue: 1.0, alpha: 1)
+    static let property = UIColor(red: 0.41, green: 0.88, blue: 0.83, alpha: 1)
+    static let builtin = UIColor(red: 0.94, green: 0.51, blue: 0.92, alpha: 1)
+    static let literal = UIColor(red: 1.0, green: 0.46, blue: 0.64, alpha: 1)
+    static let key = UIColor(red: 0.98, green: 0.72, blue: 0.32, alpha: 1)
+    static let decorator = UIColor(red: 0.78, green: 0.57, blue: 1.0, alpha: 1)
+    static let `operator` = UIColor(red: 0.96, green: 0.48, blue: 0.70, alpha: 1)
+    static let punctuation = UIColor.secondaryLabel
     static let diagnostic = UIColor(red: 1.0, green: 0.28, blue: 0.34, alpha: 1)
+}
+
+private struct NCSyntaxToken {
+    enum Kind: Hashable {
+        case plain
+        case keyword
+        case string
+        case number
+        case comment
+        case type
+        case function
+        case property
+        case builtin
+        case literal
+        case key
+        case decorator
+        case markup
+        case `operator`
+        case punctuation
+
+        var uiColor: UIColor {
+            switch self {
+            case .plain: return UIColor.label
+            case .keyword: return NCSyntaxPalette.keyword
+            case .string: return NCSyntaxPalette.string
+            case .number: return NCSyntaxPalette.number
+            case .comment: return NCSyntaxPalette.comment
+            case .type: return NCSyntaxPalette.type
+            case .function: return NCSyntaxPalette.function
+            case .property: return NCSyntaxPalette.property
+            case .builtin: return NCSyntaxPalette.builtin
+            case .literal: return NCSyntaxPalette.literal
+            case .key: return NCSyntaxPalette.key
+            case .decorator: return NCSyntaxPalette.decorator
+            case .markup: return NCSyntaxPalette.keyword
+            case .operator: return NCSyntaxPalette.`operator`
+            case .punctuation: return NCSyntaxPalette.punctuation
+            }
+        }
+
+        var swiftUIColor: Color {
+            switch self {
+            case .plain: return .primary
+            case .keyword, .markup: return NCColors.violet
+            case .string: return NCColors.orange
+            case .number: return NCColors.yellow
+            case .comment: return NCColors.green
+            case .type: return NCColors.accent
+            case .function: return Color(red: 0.42, green: 0.76, blue: 1.0)
+            case .property: return Color(red: 0.41, green: 0.88, blue: 0.83)
+            case .builtin: return NCColors.pink
+            case .literal: return NCColors.pink
+            case .key: return Color(red: 0.98, green: 0.72, blue: 0.32)
+            case .decorator: return NCColors.violet
+            case .operator: return NCColors.pink
+            case .punctuation: return NCColors.secondary
+            }
+        }
+    }
+
+    let range: NSRange
+    let kind: Kind
+}
+
+private enum NCSyntaxTokenizer {
+    static func tokenize(_ text: String, language: NCLanguage) -> [NCSyntaxToken] {
+        guard !text.isEmpty else { return [] }
+
+        var tokens: [NCSyntaxToken] = []
+        var index = text.startIndex
+        var lineStart = true
+        var previousWord: String?
+        var previousCharacter: Character?
+
+        while index < text.endIndex {
+            let character = text[index]
+
+            if character == "\n" {
+                lineStart = true
+                previousWord = nil
+                previousCharacter = nil
+                index = text.index(after: index)
+                continue
+            }
+
+            if isCommentStart(in: text, at: index, language: language) {
+                let start = index
+                let isMarkdownHeading = language == .markdown && lineStart && character == "#"
+                index = consumeUntilNewline(text, from: index)
+                tokens.append(NCSyntaxToken(
+                    range: nsRange(from: start, to: index, in: text),
+                    kind: isMarkdownHeading ? .markup : .comment
+                ))
+                lineStart = false
+                previousCharacter = "#"
+                continue
+            }
+
+            if isBlockCommentStart(in: text, at: index) {
+                let start = index
+                index = consumeDelimited(text, from: index, opening: "/*", closing: "*/")
+                tokens.append(NCSyntaxToken(range: nsRange(from: start, to: index, in: text), kind: .comment))
+                lineStart = false
+                previousCharacter = "/"
+                continue
+            }
+
+            if let delimiter = stringDelimiter(in: text, at: index, language: language) {
+                let start = index
+                index = consumeDelimited(text, from: index, opening: delimiter, closing: delimiter)
+                let kind: NCSyntaxToken.Kind
+                if language == .json && nextSignificantCharacter(in: text, from: index) == ":" {
+                    kind = .key
+                } else {
+                    kind = .string
+                }
+                tokens.append(NCSyntaxToken(range: nsRange(from: start, to: index, in: text), kind: kind))
+                lineStart = false
+                previousWord = nil
+                previousCharacter = "\""
+                continue
+            }
+
+            if character == "@" && supportsDecorators(language) {
+                let start = index
+                index = text.index(after: index)
+                while index < text.endIndex && isIdentifierPart(text[index]) {
+                    index = text.index(after: index)
+                }
+                tokens.append(NCSyntaxToken(range: nsRange(from: start, to: index, in: text), kind: .decorator))
+                lineStart = false
+                previousWord = nil
+                previousCharacter = "@"
+                continue
+            }
+
+            if isNumberStart(in: text, at: index) {
+                let start = index
+                index = consumeNumber(text, from: index)
+                tokens.append(NCSyntaxToken(range: nsRange(from: start, to: index, in: text), kind: .number))
+                lineStart = false
+                previousWord = nil
+                previousCharacter = "0"
+                continue
+            }
+
+            if isIdentifierStart(character) {
+                let start = index
+                index = text.index(after: index)
+                while index < text.endIndex && isIdentifierPart(text[index]) {
+                    index = text.index(after: index)
+                }
+
+                let word = String(text[start..<index])
+                let nextCharacter = nextSignificantCharacter(in: text, from: index)
+                let kind = classify(
+                    word: word,
+                    language: language,
+                    previousWord: previousWord,
+                    previousCharacter: previousCharacter,
+                    nextCharacter: nextCharacter
+                )
+                tokens.append(NCSyntaxToken(range: nsRange(from: start, to: index, in: text), kind: kind))
+                previousWord = word
+                previousCharacter = word.last
+                lineStart = false
+                continue
+            }
+
+            if isOperator(character) {
+                let start = index
+                index = text.index(after: index)
+                while index < text.endIndex && isOperator(text[index]) {
+                    index = text.index(after: index)
+                }
+                tokens.append(NCSyntaxToken(range: nsRange(from: start, to: index, in: text), kind: .operator))
+                lineStart = false
+                previousCharacter = character
+                continue
+            }
+
+            if isPunctuation(character) {
+                let start = index
+                index = text.index(after: index)
+                tokens.append(NCSyntaxToken(range: nsRange(from: start, to: index, in: text), kind: .punctuation))
+                lineStart = false
+                previousCharacter = character
+                continue
+            }
+
+            lineStart = false
+            previousCharacter = character
+            index = text.index(after: index)
+        }
+
+        return tokens
+    }
+
+    private static func classify(
+        word: String,
+        language: NCLanguage,
+        previousWord: String?,
+        previousCharacter: Character?,
+        nextCharacter: Character?
+    ) -> NCSyntaxToken.Kind {
+        let literals: Set<String> = [
+            "true", "false", "null", "nil", "None", "True", "False", "undefined", "NaN", "inf"
+        ]
+        if literals.contains(word) { return .literal }
+        if language.keywords.contains(word) { return .keyword }
+        if builtins(for: language).contains(word) { return .builtin }
+        if previousWord == "def" || previousWord == "func" || previousWord == "function" {
+            return .function
+        }
+        if previousWord == "class" || previousWord == "struct" || previousWord == "enum" || previousWord == "protocol" || previousWord == "interface" {
+            return .type
+        }
+        if word.first?.isUppercase == true { return .type }
+        if previousCharacter == "." { return .property }
+        if language == .json && nextCharacter == ":" { return .key }
+        if nextCharacter == "(" { return .function }
+        return .plain
+    }
+
+    private static func builtins(for language: NCLanguage) -> Set<String> {
+        switch language {
+        case .python:
+            return ["print", "len", "range", "str", "int", "float", "list", "dict", "set", "tuple", "open", "super", "isinstance", "enumerate", "zip", "map", "filter", "sorted", "sum", "min", "max", "abs", "Exception", "ValueError", "RuntimeError"]
+        case .swift:
+            return ["print", "fatalError", "precondition", "assert", "dump", "String", "Int", "Double", "Float", "Bool", "Array", "Dictionary", "Set", "Date", "URL"]
+        case .javascript, .typescript:
+            return ["console", "log", "Math", "JSON", "Promise", "Array", "Object", "String", "Number", "Boolean", "setTimeout", "setInterval"]
+        case .shell:
+            return ["echo", "printf", "read", "cd", "pwd", "export", "source"]
+        case .auto, .json, .markdown, .yaml, .plaintext:
+            return []
+        }
+    }
+
+    private static func isCommentStart(in text: String, at index: String.Index, language: NCLanguage) -> Bool {
+        let rest = text[index...]
+        if rest.hasPrefix("//") { return language == .swift || language == .javascript || language == .typescript }
+        if rest.hasPrefix("#") { return language == .python || language == .shell || language == .yaml || language == .markdown }
+        if rest.hasPrefix("<!--") { return language == .markdown }
+        return false
+    }
+
+    private static func isBlockCommentStart(in text: String, at index: String.Index) -> Bool {
+        text[index...].hasPrefix("/*")
+    }
+
+    private static func stringDelimiter(in text: String, at index: String.Index, language: NCLanguage) -> String? {
+        let rest = text[index...]
+        if language == .python && (rest.hasPrefix("\"\"\"") || rest.hasPrefix("'''")) {
+            return String(rest.prefix(3))
+        }
+        if text[index] == "\"" || text[index] == "'" || (text[index] == "`" && (language == .javascript || language == .typescript || language == .shell)) {
+            return String(text[index])
+        }
+        return nil
+    }
+
+    private static func consumeDelimited(_ text: String, from start: String.Index, opening: String, closing: String) -> String.Index {
+        var index = text.index(start, offsetBy: opening.count, limitedBy: text.endIndex) ?? text.endIndex
+        var escaped = false
+        while index < text.endIndex {
+            let character = text[index]
+            if opening.count == 1 && escaped {
+                escaped = false
+                index = text.index(after: index)
+                continue
+            }
+            if opening.count == 1 && character == "\\" {
+                escaped = true
+                index = text.index(after: index)
+                continue
+            }
+            if text[index...].hasPrefix(closing) {
+                return text.index(index, offsetBy: closing.count, limitedBy: text.endIndex) ?? text.endIndex
+            }
+            index = text.index(after: index)
+        }
+        return text.endIndex
+    }
+
+    private static func consumeUntilNewline(_ text: String, from start: String.Index) -> String.Index {
+        var index = start
+        while index < text.endIndex, text[index] != "\n" {
+            index = text.index(after: index)
+        }
+        return index
+    }
+
+    private static func consumeNumber(_ text: String, from start: String.Index) -> String.Index {
+        var index = start
+        while index < text.endIndex {
+            let character = text[index]
+            if isIdentifierPart(character) || character == "." {
+                index = text.index(after: index)
+            } else {
+                break
+            }
+        }
+        return index
+    }
+
+    private static func isNumberStart(in text: String, at index: String.Index) -> Bool {
+        if isDecimal(text[index]) { return true }
+        guard text[index] == "." else { return false }
+        let next = text.index(after: index)
+        return next < text.endIndex && isDecimal(text[next])
+    }
+
+    private static func nextSignificantCharacter(in text: String, from start: String.Index) -> Character? {
+        var index = start
+        while index < text.endIndex, isWhitespace(text[index]) {
+            index = text.index(after: index)
+        }
+        return index < text.endIndex ? text[index] : nil
+    }
+
+    private static func isIdentifierStart(_ character: Character) -> Bool {
+        character == "_" || character.unicodeScalars.allSatisfy { CharacterSet.letters.contains($0) }
+    }
+
+    private static func isIdentifierPart(_ character: Character) -> Bool {
+        isIdentifierStart(character) || isDecimal(character)
+    }
+
+    private static func isDecimal(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { CharacterSet.decimalDigits.contains($0) }
+    }
+
+    private static func isWhitespace(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) }
+    }
+
+    private static func isOperator(_ character: Character) -> Bool {
+        "=+-*/%<>!&|^~?:".contains(character)
+    }
+
+    private static func isPunctuation(_ character: Character) -> Bool {
+        "{}[](),.;".contains(character)
+    }
+
+    private static func supportsDecorators(_ language: NCLanguage) -> Bool {
+        language == .python || language == .swift || language == .javascript || language == .typescript
+    }
+
+    private static func nsRange(from start: String.Index, to end: String.Index, in text: String) -> NSRange {
+        NSRange(start..<end, in: text)
+    }
 }
 
 private enum NCSyntaxHighlighter {
@@ -498,33 +848,9 @@ private enum NCSyntaxHighlighter {
             ]
         )
 
-        guard !text.isEmpty else { return result }
-        let fullRange = NSRange(location: 0, length: (text as NSString).length)
-
-        apply(#"\b\d+(?:\.\d+)?\b"#, color: NCSyntaxPalette.number, to: result, range: fullRange)
-
-        let keywords = language.keywords
-        if !keywords.isEmpty {
-            let escaped = keywords
-                .sorted()
-                .map { NSRegularExpression.escapedPattern(for: $0) }
-                .joined(separator: "|")
-            apply(#"\b(?:"# + escaped + #")\b"#, color: NCSyntaxPalette.keyword, to: result, range: fullRange)
+        for token in NCSyntaxTokenizer.tokenize(text, language: language) {
+            result.addAttribute(.foregroundColor, value: token.kind.uiColor, range: token.range)
         }
-
-        apply(#"\b(?:[A-Z][A-Za-z0-9_]*|true|false|nil|None|True|False)\b"#, color: NCSyntaxPalette.type, to: result, range: fullRange)
-        apply(#"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'"#, color: NCSyntaxPalette.string, to: result, range: fullRange)
-
-        let commentPattern: String
-        switch language {
-        case .python, .shell, .yaml:
-            commentPattern = #"#.*$"#
-        case .markdown:
-            commentPattern = #"^\s{0,3}#{1,6}.*$"#
-        default:
-            commentPattern = #"//.*$"#
-        }
-        apply(commentPattern, color: NCSyntaxPalette.comment, to: result, range: fullRange, options: [.anchorsMatchLines])
 
         for diagnostic in diagnostics {
             guard let range = range(for: diagnostic, in: text) else { continue }
@@ -533,20 +859,6 @@ private enum NCSyntaxHighlighter {
         }
 
         return result
-    }
-
-    private static func apply(
-        _ pattern: String,
-        color: UIColor,
-        to result: NSMutableAttributedString,
-        range: NSRange,
-        options: NSRegularExpression.Options = []
-    ) {
-        guard let expression = try? NSRegularExpression(pattern: pattern, options: options) else { return }
-        expression.enumerateMatches(in: result.string, options: [], range: range) { match, _, _ in
-            guard let match else { return }
-            result.addAttribute(.foregroundColor, value: color, range: match.range)
-        }
     }
 
     private static func range(for diagnostic: NCDiagnostic, in text: String) -> NSRange? {

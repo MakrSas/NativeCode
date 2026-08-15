@@ -13,6 +13,7 @@
 		A10000000000000000000004 /* NativeCodeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000004 /* NativeCodeApp.swift */; };
 		A10000000000000000000005 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000005 /* SettingsView.swift */; };
 		A10000000000000000000006 /* WorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000006 /* WorkspaceView.swift */; };
+		A10000000000000000000007 /* PythonRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000000000000000000009 /* PythonRuntime.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -24,6 +25,7 @@
 		B10000000000000000000006 /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
 		B10000000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10000000000000000000008 /* NativeCode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NativeCode.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000000000000000000009 /* PythonRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PythonRuntime.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,6 +56,7 @@
 				B10000000000000000000004 /* NativeCodeApp.swift */,
 				B10000000000000000000005 /* SettingsView.swift */,
 				B10000000000000000000006 /* WorkspaceView.swift */,
+				B10000000000000000000009 /* PythonRuntime.swift */,
 				B10000000000000000000007 /* Info.plist */,
 			);
 			path = NativeCode;
@@ -136,6 +139,7 @@
 				A10000000000000000000004 /* NativeCodeApp.swift in Sources */,
 				A10000000000000000000005 /* SettingsView.swift in Sources */,
 				A10000000000000000000006 /* WorkspaceView.swift in Sources */,
+				A10000000000000000000007 /* PythonRuntime.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

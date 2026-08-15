@@ -23,6 +23,9 @@ jobs:
         with:
           xcode-version: '26.4.1'
 
+      - name: Prepare embedded Python runtime
+        run: bash scripts/prepare-python-runtime.sh
+
       - name: Build for Simulator
         run: >-
           xcodebuild

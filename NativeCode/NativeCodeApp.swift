@@ -23,15 +23,20 @@ struct NativeCodeShell: View {
 
             ZStack(alignment: .leading) {
                 // The navigator is the bottom layer. The editor surface above it
-                // moves as one piece, so the drawer never covers the editor.
+                // moves as one full-size piece; it is never re-laid out to fit
+                // beside the drawer.
+                Color.black
+                    .ignoresSafeArea()
+
                 NCProjectSidebar {
                     withAnimation(store.reduceMotion ? nil : .snappy(duration: 0.28)) {
                         isSidebarPresented = false
                     }
                 }
                 .frame(width: drawerWidth)
-                .frame(maxHeight: .infinity, alignment: .topLeading)
-                .background(.regularMaterial)
+                .frame(height: geometry.size.height)
+                .background(Color.black)
+                .ignoresSafeArea()
 
                 NavigationStack {
                     activeView
@@ -106,16 +111,15 @@ struct NativeCodeShell: View {
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .background(NCColors.canvas)
-                // ContainerRelativeShape follows the system container/safe area,
-                // giving the shifted surface the device's native corner treatment.
+                // ContainerRelativeShape follows the device container, while the
+                // surface itself remains the original screen width when shifted.
                 .clipShape(ContainerRelativeShape())
-                .padding(.vertical, isSidebarPresented ? 8 : 0)
-                .padding(.trailing, isSidebarPresented ? 8 : 0)
-                .offset(x: isSidebarPresented ? drawerWidth - 8 : 0)
+                .offset(x: isSidebarPresented ? drawerWidth : 0)
+                .colorMultiply(isSidebarPresented ? Color(white: 0.78) : .white)
                 .shadow(
                     color: isSidebarPresented ? .black.opacity(0.38) : .clear,
                     radius: isSidebarPresented ? 24 : 0,
-                    x: isSidebarPresented ? -6 : 0,
+                    x: isSidebarPresented ? -10 : 0,
                     y: 0
                 )
                 .zIndex(1)
@@ -129,7 +133,10 @@ struct NativeCodeShell: View {
                         }
                 )
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .background(Color.black)
         }
+        .ignoresSafeArea()
         .preferredColorScheme(.dark)
         .fileImporter(
             isPresented: $store.isShowingProjectImporter,
