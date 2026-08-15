@@ -1,0 +1,92 @@
+name: Build NativeCode
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build iOS app
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '26.4.1'
+
+      - name: Build for Simulator
+        run: >-
+          xcodebuild
+          -project NativeCode.xcodeproj
+          -scheme NativeCode
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/DerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+          build
+
+      - name: Build unsigned device app
+        run: >-
+          xcodebuild
+          -project NativeCode.xcodeproj
+          -scheme NativeCode
+          -sdk iphoneos
+          -configuration Release
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/DeviceBuild"
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+          CODE_SIGN_IDENTITY=""
+          build
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipa_root="$RUNNER_TEMP/NativeCodeIPA"
+          mkdir -p "$ipa_root/Payload"
+          cp -R "$RUNNER_TEMP/DeviceBuild/Build/Products/Release-iphoneos/NativeCode.app" "$ipa_root/Payload/NativeCode.app"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$ipa_root/Payload" "$GITHUB_WORKSPACE/NativeCode-unsigned.ipa"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: NativeCode-unsigned-ipa-${{ github.run_number }}
+          path: NativeCode-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish direct IPA download
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ipa_source="$RUNNER_TEMP/NativeCode-unsigned.ipa"
+          cp "$GITHUB_WORKSPACE/NativeCode-unsigned.ipa" "$ipa_source"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin ipa-download >/dev/null 2>&1; then
+            git fetch origin ipa-download
+            git checkout -B ipa-download FETCH_HEAD
+          else
+            git checkout --orphan ipa-download
+            git rm -rf . || true
+          fi
+
+          cp "$ipa_source" ./NativeCode-unsigned.ipa
+          git add NativeCode-unsigned.ipa
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Publish NativeCode unsigned IPA"
+          git push origin HEAD:ipa-download
