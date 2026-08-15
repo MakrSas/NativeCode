@@ -40,13 +40,7 @@ struct NativeCodeShell: View {
                             edgeDragOffset = 0
                         }
                     }
-                    .frame(
-                        width: drawerWidth,
-                        height: max(0, geometry.size.height - geometry.safeAreaInsets.top - geometry.safeAreaInsets.bottom),
-                        alignment: .top
-                    )
-                    .padding(.top, geometry.safeAreaInsets.top)
-                    .padding(.bottom, geometry.safeAreaInsets.bottom)
+                    .frame(width: drawerWidth, height: geometry.size.height, alignment: .top)
                 }
                 .frame(width: drawerWidth, height: geometry.size.height, alignment: .top)
                 .background(Color.black)
@@ -267,7 +261,7 @@ struct NCProjectSidebar: View {
                         } label: {
                             Label("Open a project", systemImage: "folder.badge.plus")
                                 .padding(.horizontal, 14)
-                                .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
                         }
                         .buttonStyle(.plain)
                         .sidebarRow()
@@ -386,6 +380,8 @@ struct NCProjectSidebar: View {
         }
         .background(Color.black)
         .foregroundStyle(.primary)
+        .safeAreaPadding(.top, 8)
+        .safeAreaPadding(.bottom, 8)
     }
 
     private var sidebarHeader: some View {
@@ -439,13 +435,12 @@ struct NCProjectSidebar: View {
     }
 
     private func sidebarSectionTitle(_ title: String) -> some View {
-        Text(title.uppercased())
-            .font(.caption.weight(.bold))
-            .tracking(1.1)
-            .foregroundStyle(NCColors.secondary)
+        Text(title)
+            .font(.headline.weight(.semibold))
+            .foregroundStyle(.primary)
             .padding(.horizontal, 8)
             .padding(.top, 22)
-            .padding(.bottom, 8)
+            .padding(.bottom, 7)
     }
 
     @ViewBuilder
@@ -469,7 +464,7 @@ struct NCProjectSidebar: View {
                 }
             }
             .padding(.horizontal, 14)
-            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -507,7 +502,7 @@ struct NCProjectSidebar: View {
             }
             .padding(.leading, CGFloat(entry.depth) * 14)
             .padding(.trailing, 14)
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -121,7 +121,8 @@ extension View {
 
     @ViewBuilder
     func sidebarRow(selected: Bool = false, tint: Color? = nil) -> some View {
-        let fill = tint ?? (selected ? NCColors.accent.opacity(0.15) : Color.white.opacity(0.045))
+        let fill = tint ?? (selected ? NCColors.accent.opacity(0.16) : .clear)
+        let hasEmphasis = selected || tint != nil
 
         self
             .background(
@@ -129,11 +130,13 @@ extension View {
                     .fill(fill)
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(
-                        Color.white.opacity(selected ? 0.13 : 0.06),
-                        lineWidth: 0.7
-                    )
+                if hasEmphasis {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(
+                            Color.white.opacity(selected ? 0.14 : 0.08),
+                            lineWidth: 0.7
+                        )
+                }
             }
     }
 }
