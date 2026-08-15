@@ -77,6 +77,7 @@ jobs:
           cp "$GITHUB_WORKSPACE/NativeCode-unsigned.ipa" "$ipa_source"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git restore -- NativeCode.xcodeproj/project.pbxproj
           rm -f "$GITHUB_WORKSPACE/NativeCode-unsigned.ipa"
 
           if git ls-remote --exit-code --heads origin ipa-download >/dev/null 2>&1; then
